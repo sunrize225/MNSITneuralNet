@@ -1,15 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-class Network:
-    def __init__(self, layers):
-        self.layers = layers
+class Images:
+    def __init__(self):
         self.images = []
         self.labels = []
-        # Weights and biases loaded in as random numbers with a normal distribution
-        self.biases  = [np.random.randn(x) for x in layers[1:]]
-        self.weights = [np.random.randn(x,y) for x,y in zip(layers[1:],layers[:-1])]
-        self.output = [np.zeros(x) for x in layers[1:]]
 
     def __loadImages(self,x):
         with open("train-images.idx3-ubyte","rb") as f:
@@ -33,10 +28,24 @@ class Network:
         for x in range(0,a):
             self.labels[x][labels[x]] = 1
 
-        self.images = []
+        self.input = []
         for x in range(0,a):
             self.images.append(images[x].reshape(784))
-    
+
+class Network:
+    def __init__(self, layers):
+        self.layers = layers
+        self.input = []
+        self.labels = []
+        # Weights and biases loaded in as random numbers with a normal distribution
+        self.biases  = [np.random.randn(x) for x in layers[1:]]
+        self.weights = [np.random.randn(x,y) for x,y in zip(layers[1:],layers[:-1])]
+        self.output = [np.zeros(x) for x in layers[1:]]
+
+    def loadTrainingData(self, input, labels): 
+        self.input = input
+        self.labels = labels
+
     def saveModel(self):
         lines = []
         layerString = [str(x) for x in self.layers]
@@ -130,7 +139,7 @@ class Network:
         # empty array for changes in weights and biases
         dWeights = [np.zeros(784),np.zeros((16,784)),np.zeros((16,16)),np.zeros((10,16))]
         dBiases = [np.zeros(x) for x in self.layers]
-        z, a = self.feedFoward(self.images[input], True)
+        z, a = self.feedFoward(self.input[input], True)
 
         # Now we will find the derivative of the cost function with respect to the last layer of weights and biases
         # The derivative of the cost function with respect to a last layer weight is: (Where d is a partial derivative)
@@ -198,7 +207,7 @@ class Network:
     def test(self, numTests=100, seed=0, type="print"):
         avg = 0
         for x in range(seed, numTests+seed):
-            self.feedFoward(self.images[x])
+            self.feedFoward(self.input[x])
             avg+= np.sum(self.cost(self.output,self.labels[x]))
         avg /= numTests
         if type=="print":
@@ -207,10 +216,10 @@ class Network:
             return avg
     
     def test2(self, num):
-        samples = np.random.randint(0, len(self.images), num)
+        samples = np.random.randint(0, len(self.input), num)
         avg = 0
         for n in range(num):
-            self.feedFoward(self.images[samples[n]])
+            self.feedFoward(self.input[samples[n]])
             answer = np.argmax(self.labels[samples[n]])
             result = np.argmax(self.output)
             print(f"Input: {answer} Output: {result} ")
@@ -220,8 +229,11 @@ class Network:
 # 784 is the number of inputs; one for each pixel (28x28 = 784)
 # There are two hidden layers and 10 outputs for each number 0-9
 layers = [784, 16, 16, 10]
+data = Images()
+data.loadData()
+
 NN = Network(layers)
-NN.loadData()
+NN.loadTrainingData(data.images, data.labels)
 NN.loadModel()
 NN.train(0,32,10,0.025, True)
 NN.test(1000)
