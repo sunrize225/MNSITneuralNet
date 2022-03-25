@@ -85,7 +85,7 @@ class Network:
             return np.maximum(0,x)
         else:
             if x>0:
-                return 1
+                return 1.0
             return 0
     
     # entire z output array as input, as the sum of output is needed for function 
@@ -98,10 +98,18 @@ class Network:
 
     # calculates error/cost from ob (observed) and pr (predicted)
     # Also includes option for derivative with respect to observed
+    # This is the cost for the entire output layer, not each individual output neuron
+    # As such, the ob and pr parameters should be an array
     def cost(self, ob, pr, deriv=False):
+        # binary cross entropy cost function
+        i = ob[pr.tolist().index(1)]
         if not deriv:
-            return (ob - pr)**2
-        return 2*(ob-pr)
+            if i != 0: 
+                return -1 * np.log(i)
+            return 1.0
+        if i != 0:
+            return  -1 * 1/i
+        return 1.0
 
     # runs input through neural net and returns an array for output
     # Hidden layers use Relu, output layer uses softmax
@@ -111,8 +119,6 @@ class Network:
                 input = self.ReLu(np.dot(input, w.T) + b)
             # intermediate variable i for reducing z value to prevent overflow error
             i = np.dot(input, self.weights[-1].T) + self.biases[-1]
-            input = np.exp(i - np.amax(i))
-            input /= np.sum(input)
             self.output = self.softMax(i)
         else:
             # z is output before activation function
@@ -143,42 +149,41 @@ class Network:
 
         # Now we will find the derivative of the cost function with respect to the last layer of weights and biases
         # The derivative of the cost function with respect to a last layer weight is: (Where d is a partial derivative)
-        # Notice for da/dz derivative is same as function
+        # Notice that da/dz is equal to a() because the derivative e^x is e^x
         # dC/dw = dC/da * da/dz * dz/dw | Where dC/da = dCost(a) | da/dz= e^z / sum = output layer | dz/dw = previous neuron
         # The derivative of the cost function with respect to bias:
         # dC/db = dC/da * da/dz * dz/db | Where dC/da = dCost(a) | da/dz= e^z / sum = output layer | dz/db = 1
 
-        # for last layer
-        # for each neuron
-        for i in range(self.layers[-1]):
-            #for each weight attached to neuron
-            for j in range(self.layers[-2]): 
-                dWeights[-1][i][j] = self.cost(self.output[i], self.labels[input][i], True) * a[-1][i] * a[-2][j]
-            dBiases[-1][i]  = self.cost(self.output[i], self.labels[input][i], True) * a[-1][i]
+        # for the last layer
+        # We only need to change the output neuron that is supposed to be 1 because all other derivatives are 0
+        correctLabelIndex = self.labels[input].tolist().index(1)
+        for j in range(self.layers[-2]):
+            dWeights[-1][correctLabelIndex][j] = self.cost(self.output, self.labels[input], True) \
+        * a[-1][correctLabelIndex] * a[-2][j]
+        dBiases[-1][correctLabelIndex] = self.cost(self.output, self.labels[input], True) * a[-1][correctLabelIndex]
 
+        # one variable for same value to reduce function calls
+        dCda = self.cost(self.output, self.labels[input], True) 
         # Layer -2 ... dC/da has changed as each neuron in the hidden layers influences 
         # each neuron on the output layer. Therefore we take the sum of each dC/dw and dC/db
         for i in range(self.layers[-2]):
             # for each weight attached to neuron
+            dCdz = dCda * self.ReLu(z[-2][i], True)
             for j in range(self.layers[-3]):
-                # We need to take the sum of the cost function as the output neuron influences multiple output neurons
-                for k in range(self.layers[-1]):
-                    dWeights[-2][i][j] += self.cost(self.output[k], self.labels[input][k], True) * self.ReLu(z[-2][i], True) * a[-3][j]
-            # The same summation needs to be done for biases
-            for j in range(self.layers[-1]):
-                dBiases[-2][i]  += self.cost(self.output[j], self.labels[input][j], True) * self.ReLu(z[-2][i], True)
+                dWeights[-2][i][j] += dCdz * a[-3][j]
+            # biase derivatives
+            dBiases[-2][i] += dCdz
         
+        dCda = self.cost(self.output, self.labels[input], True) 
         # Layer -3 ... dC/da has changed again as each neuron influences each neuron in the next layer which influences 
         # each output. Therefore, dC/da =
         for i in range(self.layers[-3]):
             # for each weight attached to neuron
+            dCdz = dCda * self.ReLu(z[-3][i], True)
             for j in range(self.layers[-4]):
-                # We need to take the sum of the cost function as the output neuron influences multiple output neurons
-                for k in range(self.layers[-1]):
-                    dWeights[-3][i][j] += self.cost(self.output[k], self.labels[input][k], True) * self.ReLu(z[-3][i], True) * a[-4][j]
-            # The same summation needs to be done for biases
-            for j in range(self.layers[-1]):
-                dBiases[-3][i]  += self.cost(self.output[j], self.labels[input][j], True) * self.ReLu(z[-3][i], True)
+                dWeights[-3][i][j] +=  dCdz * a[-4][j]
+            # biase derivatives
+            dBiases[-3][i] += dCdz
         
         return dWeights, dBiases
 
@@ -190,7 +195,7 @@ class Network:
             avB = [np.zeros(x) for x in self.layers]
             # Returns derivative of cost function with respect to weights and biases based on given input
             for x in range((y*batchSize),(y*batchSize)+batchSize-1):
-                dW, dB = self.backPropagation(np.random.randint(0,50000)+x)
+                dW, dB = self.backPropagation(x)
                 for i,z in enumerate(dW):
                     avW[i] += z / batchSize * learningRate 
                     avB[i] += dB[i] / batchSize * learningRate
@@ -234,7 +239,7 @@ data.loadData()
 
 NN = Network(layers)
 NN.loadTrainingData(data.images, data.labels)
-NN.loadModel()
-NN.train(0,32,10,0.025, True)
+#NN.loadModel()
+NN.train(0,128,10,0.025, True)
 NN.test(1000)
 NN.saveModel()
