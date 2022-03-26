@@ -122,10 +122,12 @@ class Network:
         if not prop:
             for w,b in zip(self.weights[:-1], self.biases[:-1]):
                 input = nf.ReLu_leaky(np.dot(input, w.T) + b)
+                if np.isnan(input[0]): # DELETE LATER ===================
+                    raise Exception("Input value is nan")
             # intermediate variable i for reducing z value to prevent overflow error
             i = np.dot(input, self.weights[-1].T) + self.biases[-1]
             self.output = self.softMax(i)
-            if np.isnan(self.output[0]):
+            if np.isnan(self.output[0]): # DELETE LATER ==================
                 raise Exception("Output values are nan")
         else:
             # z is output before activation function
@@ -172,8 +174,9 @@ class Network:
             # in the second to last layer directly influences every neuron in the output layer
             pCpa = 0
             for j in range(self.layers[-1]):
-                n = nf.binaryCrossEntropy_deriv(self.labels[input][j], a[-1][j]) * nf.ReLu_leaky_deriv(z[-1][j]) * self.weights[-2][j][i]
+                n = nf.binaryCrossEntropy_deriv(self.labels[input][j], a[-1][j]) * nf.softMax__deriv(z[-1], z[-1][j]) * self.weights[-2][j][i]
                 pCpa += n
+            pCpa /= self.layers[-1] # may not be necessary
             papz = nf.ReLu_leaky_deriv(z[-2][i])
             for j in range(self.layers[-3]):
                 dWeights[-2][i][j] = pCpa * papz * a[-3][j]
@@ -184,8 +187,9 @@ class Network:
             pCpa = 0
             for j in range(self.layers[-2]):
                 for k in range(self.layers[-1]):
-                    n = nf.binaryCrossEntropy_deriv(self.labels[input][k], a[-1][k]) * nf.ReLu_leaky_deriv(z[-1][k]) * self.weights[-2][k][j] * nf.ReLu_leaky_deriv(z[-2][j]) * self.weights[-3][j][i]
+                    n = nf.binaryCrossEntropy_deriv(self.labels[input][k], a[-1][k]) * nf.softMax__deriv(z[-1], z[-1][k]) * self.weights[-2][k][j] * nf.ReLu_leaky_deriv(z[-2][j]) * self.weights[-3][j][i]
                     pCpa += n
+            pCpa /= self.layers[-2] * self.layers[-1] # may not be necessary
             papz = nf.ReLu_leaky_deriv(z[-2][i])
             for j in range(self.layers[-4]):
                 dWeights[-3][i][j] = pCpa * papz * a[-4][j]
@@ -201,16 +205,16 @@ class Network:
             avB = [np.zeros(x) for x in self.layers]
             # Returns derivative of cost function with respect to weights and biases based on given input
             for x in range((y*batchSize),(y*batchSize)+batchSize-1):
-                dW, dB = self.backPropagation(x)
+                dW, dB = self.backPropagation(seed+x)
                 for i,z in enumerate(dW):
-                    avW[i] += z / batchSize * learningRate 
-                    avB[i] += dB[i] / batchSize * learningRate
+                    avW[i] += (z / batchSize) * learningRate 
+                    avB[i] += (dB[i] / batchSize) * learningRate
             # adds average results from batch to weights and biases
             for x in range(1,len(self.layers)):
                 self.biases[-x] -= avB[-x]
                 self.weights[-x] -= avW[-x]
             if showResults:
-                results.append(self.test(1000,0,"plot"))
+                results.append(self.test(100,0,"plot"))
         if showResults:
             plt.plot(range(1,numBatches+1),results)
             plt.show()
@@ -245,7 +249,7 @@ data.loadData()
 
 NN = Network(layers)
 NN.loadTrainingData(data.images, data.labels)
-#NN.loadModel()
-NN.train(0,32,10,0.025, True)
+NN.loadModel()
+NN.train(49000,64,10,10000000000, True)
 NN.test(1000)
 NN.saveModel()

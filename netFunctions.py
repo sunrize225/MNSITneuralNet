@@ -12,12 +12,12 @@ def binaryCrossEntropy(yArray, yHatArray):
             if yHat != 0:
                 sum += -1 * np.log(yHat)
             else:
-                sum += 1000
+                sum += 100
         else: 
             if yHat != 1:
-                sum += -1 * np.log(1 - yHat)
+                sum += 1 * np.log(1 - yHat)
             else:
-                sum += 1000
+                sum += 100
     sum /= yArray.size
     return sum
 
@@ -37,10 +37,10 @@ def binaryCrossEntropy_deriv(y, yHat):
 
 
 # defined for an array of values
-def ReLu_leaky(z):
+def ReLu_leaky(zArray):
     a = []
-    for value in z:
-        if value > 0:
+    for z in zArray:
+        if z > 0:
             a.append(z)
         else:
             a.append(0.01 * z)
@@ -66,5 +66,5 @@ def softMax(z):
 def softMax__deriv(zarray, z):
     sum = np.exp(zarray - np.amax(zarray))
     sum = np.sum(zarray)
-    return np.exp(z - np.amax(zarray)) * (1/sum)
+    return np.exp(z - np.amax(zarray)) / sum
     
