@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import netFunctions as nf
 
 class Images:
     def __init__(self):
@@ -79,14 +80,21 @@ class Network:
                 for l in range(n):
                     q+= self.layers[l+1]
                 self.biases[n][i] = float(biases[q+i])
-    
+
+    # using leaky relu
     def ReLu(self, x, deriv=False):
         if not deriv:
-            return np.maximum(0,x)
+            rList = []
+            for y in x:
+                if y>0:
+                    rList.append(y)
+                else:
+                    rList.append(0.01 * y)
+            return np.array(rList)
         else:
             if x>0:
-                return 1
-            return 0
+                return 1.0
+            return 0.01
     
     # entire z output array as input, as the sum of output is needed for function 
     # No derivative as d/dx e^x = e^x
@@ -98,22 +106,29 @@ class Network:
 
     # calculates error/cost from ob (observed) and pr (predicted)
     # Also includes option for derivative with respect to observed
+    # This is the cost for the entire output layer, not each individual output neuron
+    # As such, the ob and pr parameters should be an array
     def cost(self, ob, pr, deriv=False):
+        # binary cross entropy cost function
         if not deriv:
-            return (ob - pr)**2
-        return 2*(ob-pr)
+            return nf.binaryCrossEntropy(pr, ob)
+        else:
+            return nf.binaryCrossEntropy_deriv(pr, ob)
+
 
     # runs input through neural net and returns an array for output
     # Hidden layers use Relu, output layer uses softmax
     def feedFoward(self, input, prop=False):
         if not prop:
             for w,b in zip(self.weights[:-1], self.biases[:-1]):
-                input = self.ReLu(np.dot(input, w.T) + b)
+                input = nf.ReLu_leaky(np.dot(input, w.T) + b)
+                if np.isnan(input[0]): # DELETE LATER ===================
+                    raise Exception("Input value is nan")
             # intermediate variable i for reducing z value to prevent overflow error
             i = np.dot(input, self.weights[-1].T) + self.biases[-1]
-            input = np.exp(i - np.amax(i))
-            input /= np.sum(input)
             self.output = self.softMax(i)
+            if np.isnan(self.output[0]): # DELETE LATER ==================
+                raise Exception("Output values are nan")
         else:
             # z is output before activation function
             # a is output after activation function
@@ -129,14 +144,11 @@ class Network:
             # i is simply an intermediate variable used for calculation
             # We need to subtract the max value of z from all others to prevent
             # an overflow error
-            i = np.exp(z[-1] - np.amax(z[-1]))
-            i /= np.sum(i)
             a.append(self.softMax(z[-1])) 
             self.output = a[-1]
             return z, a
-        
+      
     def backPropagation(self, input):
-        # empty array for changes in weights and biases
         dWeights = [np.zeros(784),np.zeros((16,784)),np.zeros((16,16)),np.zeros((10,16))]
         dBiases = [np.zeros(x) for x in self.layers]
         z, a = self.feedFoward(self.input[input], True)
@@ -149,37 +161,40 @@ class Network:
         # dC/db = dC/da * da/dz * dz/db | Where dC/da = dCost(a) | da/dz= e^z / sum = output layer | dz/db = 1
 
         # for last layer
-        # for each neuron
         for i in range(self.layers[-1]):
-            #for each weight attached to neuron
-            for j in range(self.layers[-2]): 
-                dWeights[-1][i][j] = self.cost(self.output[i], self.labels[input][i], True) * a[-1][i] * a[-2][j]
-            dBiases[-1][i]  = self.cost(self.output[i], self.labels[input][i], True) * a[-1][i]
-
-        # Layer -2 ... dC/da has changed as each neuron in the hidden layers influences 
-        # each neuron on the output layer. Therefore we take the sum of each dC/dw and dC/db
+            pCpa = nf.binaryCrossEntropy_deriv(self.labels[input][i], a[-1][i])
+            papz = nf.softMax__deriv(z[-1], z[-1][i])
+            for j in range(self.layers[-2]):
+                dWeights[-1][i][j] = pCpa * papz * a[-2][j]
+            dBiases[-1][i] = pCpa * papz
+        
+        # for second to last layer
         for i in range(self.layers[-2]):
-            # for each weight attached to neuron
+            # pCpa is depedent on all the output neurons as any given neuron
+            # in the second to last layer directly influences every neuron in the output layer
+            pCpa = 0
+            for j in range(self.layers[-1]):
+                n = nf.binaryCrossEntropy_deriv(self.labels[input][j], a[-1][j]) * nf.softMax__deriv(z[-1], z[-1][j]) * self.weights[-2][j][i]
+                pCpa += n
+            pCpa /= self.layers[-1] # may not be necessary
+            papz = nf.ReLu_leaky_deriv(z[-2][i])
             for j in range(self.layers[-3]):
-                # We need to take the sum of the cost function as the output neuron influences multiple output neurons
-                for k in range(self.layers[-1]):
-                    dWeights[-2][i][j] += self.cost(self.output[k], self.labels[input][k], True) * self.ReLu(z[-2][i], True) * a[-3][j]
-            # The same summation needs to be done for biases
-            for j in range(self.layers[-1]):
-                dBiases[-2][i]  += self.cost(self.output[j], self.labels[input][j], True) * self.ReLu(z[-2][i], True)
+                dWeights[-2][i][j] = pCpa * papz * a[-3][j]
+            dBiases[-2][i] = pCpa * papz
         
-        # Layer -3 ... dC/da has changed again as each neuron influences each neuron in the next layer which influences 
-        # each output. Therefore, dC/da =
+        # for third to last layer
         for i in range(self.layers[-3]):
-            # for each weight attached to neuron
-            for j in range(self.layers[-4]):
-                # We need to take the sum of the cost function as the output neuron influences multiple output neurons
+            pCpa = 0
+            for j in range(self.layers[-2]):
                 for k in range(self.layers[-1]):
-                    dWeights[-3][i][j] += self.cost(self.output[k], self.labels[input][k], True) * self.ReLu(z[-3][i], True) * a[-4][j]
-            # The same summation needs to be done for biases
-            for j in range(self.layers[-1]):
-                dBiases[-3][i]  += self.cost(self.output[j], self.labels[input][j], True) * self.ReLu(z[-3][i], True)
-        
+                    n = nf.binaryCrossEntropy_deriv(self.labels[input][k], a[-1][k]) * nf.softMax__deriv(z[-1], z[-1][k]) * self.weights[-2][k][j] * nf.ReLu_leaky_deriv(z[-2][j]) * self.weights[-3][j][i]
+                    pCpa += n
+            pCpa /= self.layers[-2] * self.layers[-1] # may not be necessary
+            papz = nf.ReLu_leaky_deriv(z[-2][i])
+            for j in range(self.layers[-4]):
+                dWeights[-3][i][j] = pCpa * papz * a[-4][j]
+            dBiases[-3][i] = pCpa * papz
+
         return dWeights, dBiases
 
     def train(self, seed=0, batchSize=64, numBatches=100, learningRate=0.5, showResults=False):
@@ -190,16 +205,16 @@ class Network:
             avB = [np.zeros(x) for x in self.layers]
             # Returns derivative of cost function with respect to weights and biases based on given input
             for x in range((y*batchSize),(y*batchSize)+batchSize-1):
-                dW, dB = self.backPropagation(np.random.randint(0,50000)+x)
+                dW, dB = self.backPropagation(seed+x)
                 for i,z in enumerate(dW):
-                    avW[i] += z / batchSize * learningRate 
-                    avB[i] += dB[i] / batchSize * learningRate
+                    avW[i] += (z / batchSize) * learningRate 
+                    avB[i] += (dB[i] / batchSize) * learningRate
             # adds average results from batch to weights and biases
             for x in range(1,len(self.layers)):
                 self.biases[-x] -= avB[-x]
                 self.weights[-x] -= avW[-x]
             if showResults:
-                results.append(self.test(1000,0,"plot"))
+                results.append(self.test(100,0,"plot"))
         if showResults:
             plt.plot(range(1,numBatches+1),results)
             plt.show()
@@ -208,7 +223,7 @@ class Network:
         avg = 0
         for x in range(seed, numTests+seed):
             self.feedFoward(self.input[x])
-            avg+= np.sum(self.cost(self.output,self.labels[x]))
+            avg += self.cost(self.output,self.labels[x])
         avg /= numTests
         if type=="print":
             print(f"Average cost over {numTests} trials: {avg}")
@@ -235,6 +250,6 @@ data.loadData()
 NN = Network(layers)
 NN.loadTrainingData(data.images, data.labels)
 NN.loadModel()
-NN.train(0,32,10,0.025, True)
+NN.train(49000,64,10,10000000000, True)
 NN.test(1000)
 NN.saveModel()
