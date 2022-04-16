@@ -1,15 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import logging as log
+import netfunctions as nf
 
-class Network:
-    def __init__(self, layers):
-        self.layers = layers
+class Images:
+    def __init__(self):
         self.images = []
         self.labels = []
-        # Weights and biases loaded in as random numbers with a normal distribution
-        self.biases  = [np.random.randn(x) for x in layers[1:]]
-        self.weights = [np.random.randn(x,y) for x,y in zip(layers[1:],layers[:-1])]
-        self.output = [np.zeros(x) for x in layers[1:]]
 
     def __loadImages(self,x):
         with open("train-images.idx3-ubyte","rb") as f:
@@ -36,6 +33,20 @@ class Network:
         self.images = []
         for x in range(0,a):
             self.images.append(images[x].reshape(784))
+
+class Network:
+    def __init__(self, layers):
+        self.layers = layers
+        self.images = []
+        self.labels = []
+        # Weights and biases loaded in as random numbers with a normal distribution
+        self.biases  = [np.random.randn(x) for x in layers[1:]]
+        self.weights = [np.random.randn(x,y) for x,y in zip(layers[1:],layers[:-1])]
+        self.output = [np.zeros(x) for x in layers[1:]]
+
+    def loadTrainingData(self, images, labels):
+        self.images = images
+        self.labels = labels
     
     def saveModel(self):
         lines = []
@@ -70,41 +81,42 @@ class Network:
                 for l in range(n):
                     q+= self.layers[l+1]
                 self.biases[n][i] = float(biases[q+i])
-    
-    def ReLu(self, x, deriv=False):
+
+    # hla - hidden layer activation function
+    # ReLu activation function for the hidden layers.
+    # Includes deriv parameter to get derivative of function.
+    @staticmethod   
+    def hla(x, deriv=False):
         if not deriv:
-            return np.maximum(0,x)
-        else:
-            if x>0:
-                return 1
-            return 0
+            return nf.ReLu_leaky(x)
+        return nf.ReLu_leaky_deriv(x)
     
+    # ola - output layer activation
     # entire z output array as input, as the sum of output is needed for function 
     # No derivative as d/dx e^x = e^x
-    def softMax(self, z):
-        # subtract max value to prevent overflow -- does not affect final output values
-        output = np.exp(z - np.amax(z))
-        output /= np.sum(output)
-        return output
+    @staticmethod
+    def ola(z, zArray=[], deriv=False):
+        if not deriv:
+            return nf.softMax(z)
+        return nf.softMax__deriv(zArray, z)
 
     # calculates error/cost from ob (observed) and pr (predicted)
     # Also includes option for derivative with respect to observed
-    def cost(self, ob, pr, deriv=False):
+    @staticmethod
+    def cost(ob, pr, deriv=False):
         if not deriv:
-            return (ob - pr)**2
-        return 2*(ob-pr)
+            return nf.meanSquaredError(ob, pr)
+        return nf.meanSquaredError_deriv(ob, pr)
 
     # runs input through neural net and returns an array for output
     # Hidden layers use Relu, output layer uses softmax
     def feedFoward(self, input, prop=False):
         if not prop:
             for w,b in zip(self.weights[:-1], self.biases[:-1]):
-                input = self.ReLu(np.dot(input, w.T) + b)
+                input = self.hla(np.dot(input, w.T) + b)
             # intermediate variable i for reducing z value to prevent overflow error
             i = np.dot(input, self.weights[-1].T) + self.biases[-1]
-            input = np.exp(i - np.amax(i))
-            input /= np.sum(input)
-            self.output = self.softMax(i)
+            self.output = self.ola(i)
         else:
             # z is output before activation function
             # a is output after activation function
@@ -115,14 +127,9 @@ class Network:
             z.append(input)
             for w,b in zip(self.weights[:-1], self.biases[:-1]):
                 z.append(np.dot(a[-1], w.T) + b)
-                a.append(self.ReLu(z[-1]))
+                a.append(self.hla(z[-1]))
             z.append(np.dot(a[-1], self.weights[-1].T) + self.biases[-1])
-            # i is simply an intermediate variable used for calculation
-            # We need to subtract the max value of z from all others to prevent
-            # an overflow error
-            i = np.exp(z[-1] - np.amax(z[-1]))
-            i /= np.sum(i)
-            a.append(self.softMax(z[-1])) 
+            a.append(self.ola(z[-1])) 
             self.output = a[-1]
             return z, a
         
@@ -154,10 +161,10 @@ class Network:
             for j in range(self.layers[-3]):
                 # We need to take the sum of the cost function as the output neuron influences multiple output neurons
                 for k in range(self.layers[-1]):
-                    dWeights[-2][i][j] += self.cost(self.output[k], self.labels[input][k], True) * self.ReLu(z[-2][i], True) * a[-3][j]
+                    dWeights[-2][i][j] += self.cost(self.output[k], self.labels[input][k], True) * self.hla(z[-2][i], True) * a[-3][j]
             # The same summation needs to be done for biases
             for j in range(self.layers[-1]):
-                dBiases[-2][i]  += self.cost(self.output[j], self.labels[input][j], True) * self.ReLu(z[-2][i], True)
+                dBiases[-2][i]  += self.cost(self.output[j], self.labels[input][j], True) * self.hla(z[-2][i], True)
         
         # Layer -3 ... dC/da has changed again as each neuron influences each neuron in the next layer which influences 
         # each output. Therefore, dC/da =
@@ -166,10 +173,10 @@ class Network:
             for j in range(self.layers[-4]):
                 # We need to take the sum of the cost function as the output neuron influences multiple output neurons
                 for k in range(self.layers[-1]):
-                    dWeights[-3][i][j] += self.cost(self.output[k], self.labels[input][k], True) * self.ReLu(z[-3][i], True) * a[-4][j]
+                    dWeights[-3][i][j] += self.cost(self.output[k], self.labels[input][k], True) * self.hla(z[-3][i], True) * a[-4][j]
             # The same summation needs to be done for biases
             for j in range(self.layers[-1]):
-                dBiases[-3][i]  += self.cost(self.output[j], self.labels[input][j], True) * self.ReLu(z[-3][i], True)
+                dBiases[-3][i]  += self.cost(self.output[j], self.labels[input][j], True) * self.hla(z[-3][i], True)
         
         return dWeights, dBiases
 
@@ -217,12 +224,3 @@ class Network:
             if answer == result:
                 avg += 1
         print(f"Trials attempted {n}. Trials correct: {avg} Percent correct: {(avg/num)*100}%")
-# 784 is the number of inputs; one for each pixel (28x28 = 784)
-# There are two hidden layers and 10 outputs for each number 0-9
-layers = [784, 16, 16, 10]
-NN = Network(layers)
-NN.loadData()
-NN.loadModel()
-NN.train(0,32,10,0.025, True)
-NN.test(1000)
-NN.saveModel()
